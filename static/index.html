@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Indic Audio Studio | AI4Bharat</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #030712;
+            --card: rgba(17, 24, 39, 0.7);
+            --accent: #38bdf8;
+            --accent-glow: rgba(56, 189, 248, 0.3);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.1) 0, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(56, 189, 248, 0.1) 0, transparent 50%);
+            color: var(--text-primary);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            width: 95%;
+            max-width: 900px;
+            background: var(--card);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 28px;
+            padding: 50px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.8s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 600;
+            margin: 0;
+            background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1px;
+        }
+
+        p.subtitle {
+            color: var(--text-secondary);
+            margin-top: 8px;
+            font-weight: 300;
+        }
+
+        .input-group {
+            margin-bottom: 24px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 400;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        textarea, input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            color: var(--text-primary);
+            padding: 18px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        textarea:focus, input:focus {
+            border-color: var(--accent);
+            outline: none;
+            box-shadow: 0 0 0 4px var(--accent-glow);
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+        button {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(135deg, var(--accent) 0%, #0ea5e9 100%);
+            color: #030712;
+            border: none;
+            border-radius: 16px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 15px -3px rgba(56, 189, 248, 0.4);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            filter: brightness(1.1);
+            box-shadow: 0 20px 25px -5px rgba(56, 189, 248, 0.5);
+        }
+
+        button:active { transform: translateY(0); }
+        button:disabled { 
+            background: #334155; 
+            color: #64748b; 
+            cursor: not-allowed; 
+            box-shadow: none; 
+            transform: none; 
+        }
+
+        .loader {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+            font-size: 0.9rem;
+            color: var(--accent);
+            font-weight: 400;
+        }
+
+        #resultArea {
+            margin-top: 40px;
+            display: none;
+            padding: 30px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 20px;
+            border: 1px solid var(--border);
+            text-align: center;
+            animation: slideUp 0.5s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        audio {
+            width: 100%;
+            margin-bottom: 20px;
+            filter: invert(0.9) hue-rotate(180deg);
+        }
+
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: opacity 0.2s;
+        }
+
+        .download-btn:hover { opacity: 0.8; }
+
+        .presets {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 24px;
+            overflow-x: auto;
+            padding-bottom: 10px;
+        }
+
+        .preset-chip {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        .preset-chip:hover {
+            background: rgba(56, 189, 248, 0.1);
+            border-color: var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Indic Audio Studio</h1>
+            <p class="subtitle">High Performance Text-to-Speech for Indian Languages</p>
+        </div>
+
+        <div class="input-group">
+            <label>Input Text (Tamil / Regional)</label>
+            <textarea id="inputText" rows="5" placeholder="Paste your script here..."></textarea>
+        </div>
+
+        <div class="input-group">
+            <label>Voice Characteristics</label>
+            <div class="presets">
+                <div class="preset-chip" onclick="setDesc('A professional female voice, clear and moderate pace, high quality.')">Professional Female</div>
+                <div class="preset-chip" onclick="setDesc('A deep male voice, authoritative, slow pace, very clear audio.')">Deep Male</div>
+                <div class="preset-chip" onclick="setDesc('A neutral voice, fast energetic pace, high quality recording.')">Energetic</div>
+                <div class="preset-chip" onclick="setDesc('An emotional female voice, soft tone, slow pace.')">Soft/Emotional</div>
+            </div>
+            <input type="text" id="desc" value="A professional female voice, clear and moderate pace, high quality.">
+        </div>
+
+        <button id="genBtn" onclick="generate()">Generate Audio</button>
+
+        <div class="loader" id="loader">
+            <span id="loaderText">Processing on VM GPU... Please wait.</span>
+        </div>
+
+        <div id="resultArea">
+            <audio id="audioPlayer" controls></audio>
+            <br>
+            <a id="downloadLink" href="#" download="indic_draft.wav" class="download-btn">
+                Download WAV for YouTube Draft ↓
+            </a>
+        </div>
+    </div>
+
+    <script>
+        function setDesc(val) {
+            document.getElementById('desc').value = val;
+        }
+
+        async function generate() {
+            const text = document.getElementById('inputText').value;
+            const desc = document.getElementById('desc').value;
+            const btn = document.getElementById('genBtn');
+            const loader = document.getElementById('loader');
+            const result = document.getElementById('resultArea');
+
+            if (!text.trim()) {
+                alert("Please enter some text!");
+                return;
+            }
+            
+            btn.disabled = true;
+            loader.style.display = 'block';
+            result.style.display = 'none';
+
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ text, description: desc })
+                });
+                
+                const data = await response.json();
+                if(data.status === 'success') {
+                    document.getElementById('audioPlayer').src = data.url;
+                    document.getElementById('downloadLink').href = data.url;
+                    result.style.display = 'block';
+                } else {
+                    alert("Error: " + (data.detail || "Generation failed"));
+                }
+            } catch (e) {
+                alert("Connection error to VM. Check IP and Port 8000.");
+                console.error(e);
+            } finally {
+                btn.disabled = false;
+                loader.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+transformers
+torch
+torchaudio
+soundfile
+git+https://github.com/huggingface/parler-tts.git
+python-multipart
+gnureadline; sys_platform == 'linux'
