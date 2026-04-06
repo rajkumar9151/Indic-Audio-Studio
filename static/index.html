@@ -517,16 +517,30 @@
                 }
 
                 for (let i = 0; i < sentences.length; i++) {
-                    const percent = Math.round(((i + 1) / sentences.length) * 100);
-                    soloProgressBar.style.width = percent + "%";
-                    document.getElementById('solo-progress-percent').innerText = percent + "%";
+                    const startPercent = Math.round((i / sentences.length) * 100);
+                    const endPercent = Math.round(((i + 1) / sentences.length) * 100);
+                    
                     soloProgressText.innerText = `Sentence ${i + 1} of ${sentences.length}`;
+                    
+                    // Simple simulation to make the bar move while AI is thinking
+                    let simulatedProgress = startPercent;
+                    const simInterval = setInterval(() => {
+                        if (simulatedProgress < endPercent - 5) {
+                            simulatedProgress += 2;
+                            soloProgressBar.style.width = simulatedProgress + "%";
+                            document.getElementById('solo-progress-percent').innerText = simulatedProgress + "%";
+                        }
+                    }, 100);
 
                     const response = await fetch('/stream', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ text: sentences[i], description, quality: selectedQuality })
                     });
+                    
+                    clearInterval(simInterval);
+                    soloProgressBar.style.width = endPercent + "%";
+                    document.getElementById('solo-progress-percent').innerText = endPercent + "%";
                     
                     const blob = await response.blob();
                     const url = URL.createObjectURL(blob);
