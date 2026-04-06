@@ -61,6 +61,7 @@ class BulkRequest(BaseModel):
     text: str
     description: str
     job_id: str
+    format: str = "wav" # Support format for bulk
 
 def split_text(text):
     # Pre-process text to replace '...' with a pause token for the model
@@ -198,9 +199,24 @@ async def bulk_generate(request: BulkRequest):
                 bulk_jobs[job_id]["avg_chunk_time"] = (bulk_jobs[job_id]["avg_chunk_time"] * 0.7) + (current_avg * 0.3)
             
             # Memory Wash
-            if i % 12 == 0:
                 torch.cuda.empty_cache()
                 
+        # NITRO MERGE: Stitch all segments into one final file
+        if bulk_jobs[job_id]["files"]:
+            combined = AudioSegment.empty()
+            # Sort files to ensure correct order
+            sorted_files = sorted(bulk_jobs[job_id]["files"])
+            for f_url in sorted_files:
+                # Convert URL back to path
+                f_path = os.path.join(OUTPUT_DIR, f_url.replace("/outputs/", ""))
+                combined += AudioSegment.from_wav(f_path)
+            
+            final_ext = "mp3" if request.format == "mp3" else "wav"
+            final_name = f"final_audiobook_{job_id}.{final_ext}"
+            final_path = os.path.join(OUTPUT_DIR, final_name)
+            combined.export(final_path, format=final_ext)
+            bulk_jobs[job_id]["final_url"] = f"/outputs/{final_name}"
+
         bulk_jobs[job_id]["status"] = "completed"
         return {"status": "started", "job_id": job_id}
     except Exception as e:

@@ -450,10 +450,12 @@
             document.getElementById('bulk-progress-container').style.display = "block";
             document.getElementById('bulk-result').style.display = "none";
 
+            const format = document.getElementById('audio-format').value;
+
             const response = await fetch('/bulk-generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: currentBulkText, description, job_id: jobId })
+                body: JSON.stringify({ text: currentBulkText, description, job_id: jobId, format: format })
             });
 
             // Poll for status
@@ -484,6 +486,12 @@
                         document.getElementById('bulk-time-estimated').innerText = `✓ Complete`;
                         document.getElementById('bulk-speed-text').innerText = `Task Finished`;
                         document.getElementById('bulk-result').style.display = "block";
+                        
+                        // NEW: Show Download Button
+                        document.getElementById('bulk-result').innerHTML = `
+                            <p style="font-weight: 600; color: #10b981;">✅ Your Bulk Audiobook is Ready!</p>
+                            <a href="${statusData.final_url}" download class="btn btn-render" style="display: block; margin: 15px auto; width: auto; padding: 12px 25px;">⬇️ Download Full Audiobook</a>
+                        `;
                     }
                 }
             }, 1000);
