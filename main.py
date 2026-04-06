@@ -49,7 +49,8 @@ class BulkRequest(BaseModel):
     job_id: str
 
 def split_text(text):
-    return re.split('(?<=[.!?]) +', text)
+    # Improved regex to handle '...' and typical Tamil sentence endings
+    return re.split(r'(?<=[.!?])\s+|(?<=\.\.\.)\s*', text)
 
 @app.post("/generate")
 async def generate_full_audio(request: TTSRequest):
@@ -65,7 +66,7 @@ async def generate_full_audio(request: TTSRequest):
                 input_ids=input_ids, 
                 prompt_input_ids=prompt_input_ids,
                 do_sample=True,
-                temperature=0.7,
+                temperature=0.8,  # Increased for less robotic voice
                 top_p=0.95
             )
             
@@ -95,7 +96,7 @@ async def stream_audio(request: TTSRequest):
                     input_ids=input_ids, 
                     prompt_input_ids=prompt_input_ids,
                     do_sample=True,
-                    temperature=0.7,
+                    temperature=0.8, # Increased for less robotic voice
                     top_p=0.95
                 )
             
@@ -144,6 +145,10 @@ async def bulk_generate(request: BulkRequest):
             
             bulk_jobs[job_id]["files"].append(f"/outputs/{job_id}/{file_name}")
             bulk_jobs[job_id]["progress"] += 1
+            
+            # Memory Wash to maintain GPU speed
+            if i % 5 == 0:
+                torch.cuda.empty_cache()
             
         bulk_jobs[job_id]["status"] = "completed"
         return {"status": "started", "job_id": job_id}
