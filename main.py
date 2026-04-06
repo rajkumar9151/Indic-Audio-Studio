@@ -33,9 +33,17 @@ model = ParlerTTSForConditionalGeneration.from_pretrained(
     model_id, 
     torch_dtype=torch.float16 if device != "cpu" else torch.float32,
     low_cpu_mem_usage=True,
-    attn_implementation="eager" # Optimized Eager Mode
+    attn_implementation="eager" # Compatible Eager Mode
 ).to(device)
 tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+# NEW: AI Memory Cache (Prompt Caching)
+encoded_prompts_cache = {}
+
+def get_encoded_prompt(description):
+    if description not in encoded_prompts_cache:
+        encoded_prompts_cache[description] = tokenizer(description, return_tensors="pt").input_ids.to(device)
+    return encoded_prompts_cache[description]
 
 # Store job status for bulk processing
 bulk_jobs = {}
@@ -61,19 +69,18 @@ def split_text(text):
 @app.post("/generate")
 async def generate_full_audio(request: TTSRequest):
     try:
+        # AI Memory Speedup: Reuse the voice prompt
+        input_ids = get_encoded_prompt(request.description)
+        
         with torch.inference_mode():
-            input_ids = tokenizer(request.description, return_tensors="pt").input_ids.to(device)
             prompt_input_ids = tokenizer(request.text, return_tensors="pt").input_ids.to(device)
-            
-            if request.quality == "4k":
-                model.to(torch.float32)
-            
             generation = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.8)
             
         audio_data = generation.cpu().numpy().astype("float32").squeeze()
         
-        # Add a tiny bit of padding at the end for natural flow
-        padding = np.zeros(int(model.config.sampling_rate * 0.5), dtype=np.float32)
+        # Hardware Silence fix for (...) dots
+        padding_len = 1.0 if "..." in request.text else 0.4
+        padding = np.zeros(int(model.config.sampling_rate * padding_len), dtype=np.float32)
         audio_final = np.concatenate([audio_data, padding])
 
         file_id = f"audio_{uuid.uuid4().hex[:8]}.wav"
@@ -87,15 +94,16 @@ async def generate_full_audio(request: TTSRequest):
 @app.post("/stream")
 async def stream_audio(request: TTSRequest):
     try:
-        # One-shot inference for maximum speed
+        # AI Memory Speedup
+        input_ids = get_encoded_prompt(request.description)
+        
         with torch.inference_mode():
-            input_ids = tokenizer(request.description, return_tensors="pt").input_ids.to(device)
             prompt_input_ids = tokenizer(request.text, return_tensors="pt").input_ids.to(device)
             gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.8)
             
         audio_data = gen.cpu().numpy().astype("float32").squeeze()
         
-        # If text contains '...', add extra silence manually
+        # Hardware Silence fix
         padding_len = 0.8 if "..." in request.text else 0.2
         padding = np.zeros(int(model.config.sampling_rate * padding_len), dtype=np.float32)
         audio_final = np.concatenate([audio_data, padding])
