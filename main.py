@@ -61,14 +61,19 @@ class BulkRequest(BaseModel):
     text: str
     description: str
     job_id: str
-    format: str = "wav" # Support format for bulk
+    format: str = "wav"
+    quality: str = "turbo" # Added quality to bulk
 
-def split_text(text):
+def split_text(text, mode="turbo"):
     # Pre-process text to replace '...' with a pause token for the model
-    text = text.replace("...", " [pause] ")
-    # Robust regex to split on . ! ? even without a following space. 
-    # Also filters out empty strings and trailing whitespace.
-    chunks = [s.strip() for s in re.split(r'(?<=[.!?])\s*', text) if s.strip()]
+    cleaned = text.replace("...", " [pause] ")
+    
+    if mode == "4k":
+        # 4K Production: Split by paragraph for peak flow (just like Solo 4K)
+        chunks = [s.strip() for s in cleaned.split("\n") if s.strip()]
+    else:
+        # Turbo: Split by sentences for maximum speed
+        chunks = [s.strip() for s in re.split(r'(?<=[.!?])\s*', cleaned) if s.strip()]
     return chunks
 
 @app.post("/generate")
@@ -153,7 +158,13 @@ async def bulk_generate(request: BulkRequest):
     }
     
     try:
-        sentences = split_text(request.text)
+        # 4K Logic: Dynamically switch precision for bulk quality
+        if request.quality == "4k":
+            model.to(torch.float32)
+        else:
+            model.to(torch.float16)
+
+        sentences = split_text(request.text, mode=request.quality)
         bulk_jobs[job_id]["total"] = len(sentences)
         
         job_dir = os.path.join(OUTPUT_DIR, job_id)
