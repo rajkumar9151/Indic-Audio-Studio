@@ -64,16 +64,11 @@ class BulkRequest(BaseModel):
     format: str = "wav"
     quality: str = "turbo" # Added quality to bulk
 
-def split_text(text, mode="turbo"):
+def split_text(text):
     # Pre-process text to replace '...' with a pause token for the model
-    cleaned = text.replace("...", " [pause] ")
-    
-    if mode == "4k":
-        # 4K Production: Split by paragraph for peak flow (just like Solo 4K)
-        chunks = [s.strip() for s in cleaned.split("\n") if s.strip()]
-    else:
-        # Turbo: Split by sentences for maximum speed
-        chunks = [s.strip() for s in re.split(r'(?<=[.!?])\s*', cleaned) if s.strip()]
+    text = text.replace("...", " [pause] ")
+    # Nitro Standard: Always split by sentence for the most natural 'Quick Stream' feel
+    chunks = [s.strip() for s in re.split(r'(?<=[.!?])\s*', text) if s.strip()]
     return chunks
 
 @app.post("/generate")
@@ -88,15 +83,15 @@ async def generate_full_audio(request: TTSRequest):
             
         audio_data = generation.cpu().numpy().astype("float32").squeeze()
         
-        # Hardware Silence fix for (...) dots
-        padding_len = 1.0 if "..." in request.text else 0.4
+        # Reduced padding (0.05s) to stop 'lingering'
+        padding_len = 0.5 if "..." in request.text else 0.05
         padding = np.zeros(int(model.config.sampling_rate * padding_len), dtype=np.float32)
         audio_final = np.concatenate([audio_data, padding])
 
         file_id = f"audio_{uuid.uuid4().hex[:8]}.wav"
         file_path = os.path.join(OUTPUT_DIR, file_id)
         sf.write(file_path, audio_final, model.config.sampling_rate)
-
+        
         # Convert to MP3 if requested
         if request.format == "mp3":
             audio_seg = AudioSegment.from_wav(file_path)
@@ -121,8 +116,8 @@ async def stream_audio(request: TTSRequest):
             
         audio_data = gen.cpu().numpy().astype("float32").squeeze()
         
-        # Hardware Silence fix
-        padding_len = 0.8 if "..." in request.text else 0.2
+        # Tight flow for streaming (0.05s)
+        padding_len = 0.5 if "..." in request.text else 0.05
         padding = np.zeros(int(model.config.sampling_rate * padding_len), dtype=np.float32)
         audio_final = np.concatenate([audio_data, padding])
 
@@ -158,13 +153,10 @@ async def bulk_generate(request: BulkRequest):
     }
     
     try:
-        # 4K Logic: Dynamically switch precision for bulk quality
-        if request.quality == "4k":
-            model.to(torch.float32)
-        else:
-            model.to(torch.float16)
+        # Always use high-reliability mode for bulk
+        model.to(torch.float16)
 
-        sentences = split_text(request.text, mode=request.quality)
+        sentences = split_text(request.text)
         bulk_jobs[job_id]["total"] = len(sentences)
         
         job_dir = os.path.join(OUTPUT_DIR, job_id)
