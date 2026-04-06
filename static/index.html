@@ -522,7 +522,12 @@
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, description, quality: selectedQuality })
+                    body: JSON.stringify({ 
+                        text, 
+                        description, 
+                        quality: selectedQuality,
+                        format: document.getElementById('audio-format').value
+                    })
                 });
                 
                 clearInterval(iv);

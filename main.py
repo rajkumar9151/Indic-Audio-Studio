@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 import numpy as np
+from pydub import AudioSegment
 from parler_tts import ParlerTTSForConditionalGeneration
 from transformers import AutoTokenizer
 
@@ -52,6 +53,7 @@ class TTSRequest(BaseModel):
     text: str
     description: str
     quality: str = "turbo" 
+    format: str = "wav" # Default to WAV
 
 class BulkRequest(BaseModel):
     text: str
@@ -86,6 +88,14 @@ async def generate_full_audio(request: TTSRequest):
         file_id = f"audio_{uuid.uuid4().hex[:8]}.wav"
         file_path = os.path.join(OUTPUT_DIR, file_id)
         sf.write(file_path, audio_final, model.config.sampling_rate)
+
+        # Convert to MP3 if requested
+        if request.format == "mp3":
+            audio_seg = AudioSegment.from_wav(file_path)
+            mp3_id = file_id.replace(".wav", ".mp3")
+            mp3_path = os.path.join(OUTPUT_DIR, mp3_id)
+            audio_seg.export(mp3_path, format="mp3", bitrate="192k")
+            return {"url": f"/outputs/{mp3_id}", "status": "success"}
         
         return {"url": f"/outputs/{file_id}", "status": "success"}
     except Exception as e:
