@@ -31,7 +31,8 @@ print(f"--- Loading Indic Parler-TTS Ultimate on {device} ---")
 model = ParlerTTSForConditionalGeneration.from_pretrained(
     model_id, 
     torch_dtype=torch.float16 if device != "cpu" else torch.float32,
-    low_cpu_mem_usage=True
+    low_cpu_mem_usage=True,
+    attn_implementation="sdpa" # Turbo Speed Attention
 ).to(device)
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 
@@ -89,28 +90,20 @@ async def generate_full_audio(request: TTSRequest):
 
 @app.post("/stream")
 async def stream_audio(request: TTSRequest):
-    def audio_generator():
-        sentences = split_text(request.text)
-        for sentence in sentences:
-            if not sentence.strip(): continue
-            with torch.inference_mode():
-                input_ids = tokenizer(request.description, return_tensors="pt").input_ids.to(device)
-                prompt_input_ids = tokenizer(sentence, return_tensors="pt").input_ids.to(device)
-                gen = model.generate(
-                    input_ids=input_ids, 
-                    prompt_input_ids=prompt_input_ids,
-                    do_sample=True,
-                    temperature=0.8, # Increased for less robotic voice
-                    top_p=0.95
-                )
+    try:
+        # One-shot inference for maximum speed
+        with torch.inference_mode():
+            input_ids = tokenizer(request.description, return_tensors="pt").input_ids.to(device)
+            prompt_input_ids = tokenizer(request.text, return_tensors="pt").input_ids.to(device)
+            gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.8)
             
-            # FIX: Ensure we cast to float32 for WAV stream
-            audio_data = gen.cpu().numpy().astype("float32").squeeze()
-            buffer = io.BytesIO()
-            sf.write(buffer, audio_data, model.config.sampling_rate, format="WAV")
-            yield buffer.getvalue()
-
-    return StreamingResponse(audio_generator(), media_type="audio/wav")
+        audio_data = gen.cpu().numpy().astype("float32").squeeze()
+        buffer = io.BytesIO()
+        sf.write(buffer, audio_data, model.config.sampling_rate, format="WAV")
+        buffer.seek(0)
+        return StreamingResponse(buffer, media_type="audio/wav")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/system-health")
 async def get_health():

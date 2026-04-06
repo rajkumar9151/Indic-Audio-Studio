@@ -494,79 +494,55 @@
             const downloadBtn = document.getElementById('download-btn');
             const soloProgressCont = document.getElementById('solo-progress-container');
             const soloProgressBar = document.getElementById('solo-progress-bar');
-            const soloProgressText = document.getElementById('solo-progress-text');
+            const soloProgressPercent = document.getElementById('solo-progress-percent');
 
-            if (mode === 'stream') {
-                status.innerText = "⚡ Initializing Real-Time Voice...";
-                soloProgressCont.style.display = "block";
-                
-                // Split text into chunks for instant playback
-                const sentences = text.replace(/\.\.\./g, ' [pause] ').split(/[.!?]\s*/).filter(s => s.trim());
-                let audioQueue = [];
-                let isPlaying = false;
-
-                async function playNextInQueue() {
-                    if (audioQueue.length > 0 && !isPlaying) {
-                        isPlaying = true;
-                        const url = audioQueue.shift();
-                        audioPlayer.src = url;
-                        audioPlayer.onended = () => { isPlaying = false; playNextInQueue(); };
-                        audioPlayer.play();
-                        playerCard.style.display = "block";
-                    }
+            status.innerText = "⚡ Generating Voice...";
+            soloProgressCont.style.display = "block";
+            
+            // Fast Progress Hack: Crawls smoothly while GPU works
+            let prog = 0;
+            const iv = setInterval(() => {
+                if (prog < 95) {
+                    prog += (100 - prog) * 0.1; // Slows down as it nears 95%
+                    soloProgressBar.style.width = prog + "%";
+                    soloProgressPercent.innerText = Math.round(prog) + "%";
                 }
+            }, 150);
 
-                for (let i = 0; i < sentences.length; i++) {
-                    const startPercent = Math.round((i / sentences.length) * 100);
-                    const endPercent = Math.round(((i + 1) / sentences.length) * 100);
-                    
-                    soloProgressText.innerText = `Sentence ${i + 1} of ${sentences.length}`;
-                    
-                    // Simple simulation to make the bar move while AI is thinking
-                    let simulatedProgress = startPercent;
-                    const simInterval = setInterval(() => {
-                        if (simulatedProgress < endPercent - 5) {
-                            simulatedProgress += 2;
-                            soloProgressBar.style.width = simulatedProgress + "%";
-                            document.getElementById('solo-progress-percent').innerText = simulatedProgress + "%";
-                        }
-                    }, 100);
-
-                    const response = await fetch('/stream', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: sentences[i], description, quality: selectedQuality })
-                    });
-                    
-                    clearInterval(simInterval);
-                    soloProgressBar.style.width = endPercent + "%";
-                    document.getElementById('solo-progress-percent').innerText = endPercent + "%";
-                    
-                    const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    audioQueue.push(url);
-                    playNextInQueue();
-                    
-                    if (i === 0) status.innerText = "⚡ Streaming Active...";
-                }
-                
-                setTimeout(() => { soloProgressCont.style.display = "none"; }, 1000);
-            } else {
-                status.innerText = "💾 Rendering 4K Quality...";
-                const response = await fetch('/generate', {
+            try {
+                const endpoint = mode === 'stream' ? '/stream' : '/generate';
+                const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text, description, quality: selectedQuality })
                 });
                 
-                const data = await response.json();
-                if (data.status === 'success') {
-                    audioPlayer.src = data.url;
-                    downloadBtn.href = data.url;
+                clearInterval(iv);
+                soloProgressBar.style.width = "100%";
+                soloProgressPercent.innerText = "100%";
+
+                if (mode === 'stream') {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    audioPlayer.src = url;
+                    audioPlayer.play();
                     playerCard.style.display = "block";
-                    status.innerText = "✅ High Quality Audio Ready!";
+                    status.innerText = "⚡ Streaming Complete";
+                } else {
+                    const data = await response.json();
+                    if (data.status === 'success') {
+                        audioPlayer.src = data.url;
+                        downloadBtn.href = data.url;
+                        playerCard.style.display = "block";
+                        status.innerText = "✅ High Quality Ready!";
+                    }
                 }
+            } catch (err) {
+                clearInterval(iv);
+                status.innerText = "❌ Error: " + err.message;
             }
+            
+            setTimeout(() => { soloProgressCont.style.display = "none"; }, 1500);
         }
     </script>
 </body>
