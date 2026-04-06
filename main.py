@@ -32,7 +32,7 @@ model = ParlerTTSForConditionalGeneration.from_pretrained(
     model_id, 
     torch_dtype=torch.float16 if device != "cpu" else torch.float32,
     low_cpu_mem_usage=True,
-    attn_implementation="sdpa" # Turbo Speed Attention
+    attn_implementation="eager" # Optimized Eager Mode
 ).to(device)
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 
