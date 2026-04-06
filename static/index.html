@@ -200,11 +200,25 @@
     <button class="btn-theme" onclick="toggleTheme()">🌓</button>
 
     <div class="studio-container">
-        <h1>Indic Audio Studio <span style="font-size: 0.5em; vertical-align: middle; opacity: 0.7;">ULTIMATE</span></h1>
-        <p class="subtitle">AI4Bharat Indic Parler-TTS &bull; Tamil Professional Production</p>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+                <h1>Indic Audio Studio <span style="font-size: 0.5em; vertical-align: middle; opacity: 0.7;">ULTIMATE</span></h1>
+                <p class="subtitle" style="text-align: left;">AI4Bharat Indic Parler-TTS &bull; Tamil Professional Production</p>
+            </div>
+            <div id="gpu-status-badge" style="padding: 8px 12px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; background: #e2e8f0; color: #64748b; display: flex; align-items: center; gap: 8px;">
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #94a3b8;" id="status-dot"></span>
+                <span id="status-text">Checking System...</span>
+            </div>
+        </div>
+
+        <!-- NEW: Tabs for Solo and Bulk -->
+        <div style="display: flex; gap: 10px; margin-bottom: 25px;">
+            <button id="tab-solo" class="quality-btn active" onclick="switchMode('solo')">Solo Text</button>
+            <button id="tab-bulk" class="quality-btn" onclick="switchMode('bulk')">Bulk Cloud (100+ Pages)</button>
+        </div>
 
         <div class="editor-grid">
-            <div class="main-editor">
+            <div class="main-editor" id="solo-editor">
                 <textarea id="tts-text" placeholder="உங்கள் உரையை இங்கே தட்டச்சு செய்யவும்... (Type your Tamil script here...)"></textarea>
                 <div id="status"></div>
                 
@@ -216,6 +230,31 @@
                 <div class="audio-player-container" id="player-card">
                     <audio id="audio-player" controls></audio>
                     <a id="download-btn" class="download-link" href="#" target="_blank">⬇️ Download High Quality WAV</a>
+                </div>
+            </div>
+
+            <!-- NEW: Bulk Editor UI -->
+            <div class="main-editor" id="bulk-editor" style="display: none;">
+                <div style="border: 2px dashed rgba(61, 90, 254, 0.3); border-radius: 16px; padding: 40px; text-align: center; background: rgba(0,0,0,0.02);">
+                    <p style="font-size: 1.1rem; margin-bottom: 20px;">Upload your 100+ page file (.txt)</p>
+                    <input type="file" id="bulk-file" accept=".txt" style="display: none;" onchange="handleFileUpload(this)">
+                    <button class="btn btn-stream" style="width: auto; margin: 0 auto;" onclick="document.getElementById('bulk-file').click()">📂 Choose .txt File</button>
+                    <p id="file-info" style="margin-top: 15px; font-size: 0.9rem; color: #64748b;"></p>
+                </div>
+                
+                <div id="bulk-progress-container" style="display: none; margin-top: 30px; background: rgba(0,0,0,0.05); padding: 20px; border-radius: 16px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                        <span id="bulk-progress-text" style="font-weight: 600; color: var(--primary);">Processing: 0%</span>
+                        <span id="bulk-progress-count" style="font-size: 0.8rem; color: #64748b;">0 / 0 paras</span>
+                    </div>
+                    <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; overflow: hidden;">
+                        <div id="bulk-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: 0.3s;"></div>
+                    </div>
+                </div>
+
+                <div id="bulk-result" style="display: none; margin-top: 20px; text-align: center;">
+                    <p style="font-weight: 600; color: #10b981;">✅ Your Bulk Audiobook is Ready!</p>
+                    <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 15px;">Combined audio is processing in the outputs folder.</p>
                 </div>
             </div>
 
@@ -275,16 +314,93 @@
     </div>
 
     <script>
-        let selectedQuality = "turbo";
+        async function updateHealth() {
+            try {
+                const response = await fetch('/system-health');
+                const data = await response.json();
+                const badge = document.getElementById('gpu-status-badge');
+                const dot = document.getElementById('status-dot');
+                const text = document.getElementById('status-text');
 
-        function setQuality(val) {
-            selectedQuality = val;
-            document.getElementById('q-turbo').classList.toggle('active', val === 'turbo');
-            document.getElementById('q-4k').classList.toggle('active', val === '4k');
+                if (data.cuda_available) {
+                    dot.style.background = "#10b981";
+                    text.innerText = `GPU Active (L4/T4) - ${data.memory_allocated} Free`;
+                    badge.style.background = "#dcfce7";
+                    badge.style.color = "#166534";
+                } else {
+                    dot.style.background = "#ef4444";
+                    text.innerText = "System on CPU (Slow Mode)";
+                    badge.style.background = "#fee2e2";
+                    badge.style.color = "#991b1b";
+                    alert("⚠️ WARNING: Server is in CPU mode. Audio will be VERY SLOW. Check your SSH window for driver fixes.");
+                }
+            } catch (e) {
+                console.error("Health check failed");
+            }
         }
 
-        function toggleTheme() {
-            document.body.classList.toggle('dark-mode');
+        updateHealth();
+        setInterval(updateHealth, 30000);
+
+        function switchMode(mode) {
+            document.getElementById('tab-solo').classList.toggle('active', mode === 'solo');
+            document.getElementById('tab-bulk').classList.toggle('active', mode === 'bulk');
+            document.getElementById('solo-editor').style.display = mode === 'solo' ? 'block' : 'none';
+            document.getElementById('bulk-editor').style.display = mode === 'bulk' ? 'block' : 'none';
+        }
+
+        let currentBulkText = "";
+
+        function handleFileUpload(input) {
+            const file = input.files[0];
+            if (!file) return;
+            
+            document.getElementById('file-info').innerText = `Selected: ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                currentBulkText = e.target.result;
+                startBulkGeneration();
+            };
+            reader.readAsText(file);
+        }
+
+        async function startBulkGeneration() {
+            if (!currentBulkText) return;
+            
+            const jobId = "bulk_" + Math.random().toString(36).substring(7);
+            const voice = document.getElementById('voice-preset').value;
+            const speed = document.getElementById('speed').value;
+            const clarity = document.getElementById('clarity').value;
+            const emotion = document.getElementById('emotion').value;
+            const description = `${voice} voice, ${emotion}, ${speed}, ${clarity}, speaking in Tamil.`;
+
+            document.getElementById('bulk-progress-container').style.display = "block";
+            document.getElementById('bulk-result').style.display = "none";
+
+            const response = await fetch('/bulk-generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: currentBulkText, description, job_id: jobId })
+            });
+
+            // Poll for status
+            const interval = setInterval(async () => {
+                const statusRes = await fetch(`/bulk-status/${jobId}`);
+                const statusData = await statusRes.json();
+                
+                if (statusData.status === 'processing' || statusData.status === 'completed') {
+                    const percent = Math.round((statusData.progress / statusData.total) * 100);
+                    document.getElementById('bulk-progress-bar').style.width = percent + "%";
+                    document.getElementById('bulk-progress-text').innerText = `Processing: ${percent}%`;
+                    document.getElementById('bulk-progress-count').innerText = `${statusData.progress} / ${statusData.total} paras`;
+                    
+                    if (statusData.status === 'completed') {
+                        clearInterval(interval);
+                        document.getElementById('bulk-result').style.display = "block";
+                    }
+                }
+            }, 1000);
         }
 
         async function generateAudio(mode) {

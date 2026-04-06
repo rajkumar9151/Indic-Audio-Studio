@@ -35,10 +35,18 @@ model = ParlerTTSForConditionalGeneration.from_pretrained(
 ).to(device)
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 
+# Store job status for bulk processing
+bulk_jobs = {}
+
 class TTSRequest(BaseModel):
     text: str
     description: str
     quality: str = "turbo" 
+
+class BulkRequest(BaseModel):
+    text: str
+    description: str
+    job_id: str
 
 def split_text(text):
     return re.split('(?<=[.!?]) +', text)
@@ -98,6 +106,55 @@ async def stream_audio(request: TTSRequest):
             yield buffer.getvalue()
 
     return StreamingResponse(audio_generator(), media_type="audio/wav")
+
+@app.get("/system-health")
+async def get_health():
+    return {
+        "device": device,
+        "cuda_available": torch.cuda.is_available(),
+        "memory_allocated": f"{torch.cuda.memory_allocated(0) / 1024**3:.2f} GB" if torch.cuda.is_available() else "0 GB"
+    }
+
+@app.post("/bulk-generate")
+async def bulk_generate(request: BulkRequest):
+    job_id = request.job_id
+    bulk_jobs[job_id] = {"status": "processing", "progress": 0, "total": 0, "files": []}
+    
+    try:
+        sentences = split_text(request.text)
+        bulk_jobs[job_id]["total"] = len(sentences)
+        
+        job_dir = os.path.join(OUTPUT_DIR, job_id)
+        os.makedirs(job_dir, exist_ok=True)
+        
+        for i, sentence in enumerate(sentences):
+            if not sentence.strip(): 
+                bulk_jobs[job_id]["progress"] += 1
+                continue
+                
+            with torch.inference_mode():
+                input_ids = tokenizer(request.description, return_tensors="pt").input_ids.to(device)
+                prompt_input_ids = tokenizer(sentence, return_tensors="pt").input_ids.to(device)
+                gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids)
+            
+            audio_arr = gen.cpu().numpy().astype("float32").squeeze()
+            file_name = f"part_{i:03d}.wav"
+            file_path = os.path.join(job_dir, file_name)
+            sf.write(file_path, audio_arr, model.config.sampling_rate)
+            
+            bulk_jobs[job_id]["files"].append(f"/outputs/{job_id}/{file_name}")
+            bulk_jobs[job_id]["progress"] += 1
+            
+        bulk_jobs[job_id]["status"] = "completed"
+        return {"status": "started", "job_id": job_id}
+    except Exception as e:
+        bulk_jobs[job_id]["status"] = "failed"
+        bulk_jobs[job_id]["error"] = str(e)
+        return {"status": "error", "message": str(e)}
+
+@app.get("/bulk-status/{job_id}")
+async def get_bulk_status(job_id: str):
+    return bulk_jobs.get(job_id, {"status": "not_found"})
 
 app.mount("/outputs", StaticFiles(directory=OUTPUT_DIR), name="outputs")
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

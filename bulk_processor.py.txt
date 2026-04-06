@@ -1,0 +1,52 @@
+import requests
+import os
+import time
+
+# 1. Configuration
+API_URL = "http://localhost:8000/generate"  # Running locally on the server
+INPUT_FILE = "my_100_pages.txt"              # Your 100-page text file
+OUTPUT_FOLDER = "audio_output"               # Where to save the sound files
+VOICE_PRESET = "Professional Female"          # Choose your voice
+
+if not os.path.exists(OUTPUT_FOLDER):
+    os.makedirs(OUTPUT_FOLDER)
+
+# 2. Read and Split the Text
+# We split by '.' or '\n' to handle large files
+with open(INPUT_FILE, "r", encoding="utf-8") as f:
+    full_text = f.read()
+
+# Splitting text into paragraphs (or sentences) to avoid memory issues
+chunks = [s.strip() for s in full_text.split("\n") if s.strip()]
+
+print(f"--- Starting Bulk Processing: {len(chunks)} Chunks ---")
+
+# 3. Process Each Chunk
+for i, chunk in enumerate(chunks):
+    filename = f"{OUTPUT_FOLDER}/part_{i:03d}.wav"
+    
+    print(f"Processing Part {i+1}/{len(chunks)}...")
+    
+    # Send the request to your FastAPI server
+    payload = {
+        "text": chunk,
+        "voice_preset": VOICE_PRESET,
+        "audio_clarity": "High Quality"
+    }
+    
+    try:
+        response = requests.post(API_URL, json=payload)
+        if response.status_code == 200:
+            with open(filename, "wb") as audio_file:
+                audio_file.write(response.content)
+            print(f"Successfully saved: {filename}")
+        else:
+            print(f"Error on Part {i+1}: {response.text}")
+            
+    except Exception as e:
+        print(f"Request failed: {e}")
+    
+    # Small pause to let the GPU cool down (optional)
+    time.sleep(0.5)
+
+print("--- FINISHED! All 100 pages are now audio files. ---")
