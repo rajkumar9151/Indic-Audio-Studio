@@ -49,8 +49,9 @@ class BulkRequest(BaseModel):
     job_id: str
 
 def split_text(text):
-    # Improved regex to handle '...' and typical Tamil sentence endings
-    return re.split(r'(?<=[.!?])\s+|(?<=\.\.\.)\s*', text)
+    # Pre-process text to replace '...' with a pause token for the model
+    text = text.replace("...", " [pause] ")
+    return re.split(r'(?<=[.!?])\s+', text)
 
 @app.post("/generate")
 async def generate_full_audio(request: TTSRequest):
@@ -110,16 +111,27 @@ async def stream_audio(request: TTSRequest):
 
 @app.get("/system-health")
 async def get_health():
-    return {
-        "device": device,
-        "cuda_available": torch.cuda.is_available(),
-        "memory_allocated": f"{torch.cuda.memory_allocated(0) / 1024**3:.2f} GB" if torch.cuda.is_available() else "0 GB"
-    }
+    if torch.cuda.is_available():
+        free_mem, total_mem = torch.cuda.mem_get_info(0)
+        return {
+            "device": device,
+            "cuda_available": True,
+            "memory_free": f"{free_mem / 1024**3:.2f} GB",
+            "memory_total": f"{total_mem / 1024**3:.2f} GB"
+        }
+    return {"device": "cpu", "cuda_available": False, "memory_free": "0 GB"}
 
 @app.post("/bulk-generate")
 async def bulk_generate(request: BulkRequest):
     job_id = request.job_id
-    bulk_jobs[job_id] = {"status": "processing", "progress": 0, "total": 0, "files": []}
+    bulk_jobs[job_id] = {
+        "status": "processing", 
+        "progress": 0, 
+        "total": 0, 
+        "files": [],
+        "start_time": time.time(),
+        "avg_chunk_time": 0
+    }
     
     try:
         sentences = split_text(request.text)
@@ -129,6 +141,7 @@ async def bulk_generate(request: BulkRequest):
         os.makedirs(job_dir, exist_ok=True)
         
         for i, sentence in enumerate(sentences):
+            start_chunk = time.time()
             if not sentence.strip(): 
                 bulk_jobs[job_id]["progress"] += 1
                 continue
@@ -146,8 +159,15 @@ async def bulk_generate(request: BulkRequest):
             bulk_jobs[job_id]["files"].append(f"/outputs/{job_id}/{file_name}")
             bulk_jobs[job_id]["progress"] += 1
             
+            # Calculate rolling average for more accurate time estimation
+            chunk_duration = time.time() - start_chunk
+            if bulk_jobs[job_id]["avg_chunk_time"] == 0:
+                bulk_jobs[job_id]["avg_chunk_time"] = chunk_duration
+            else:
+                bulk_jobs[job_id]["avg_chunk_time"] = (bulk_jobs[job_id]["avg_chunk_time"] * 0.7) + (chunk_duration * 0.3)
+            
             # Memory Wash to maintain GPU speed
-            if i % 5 == 0:
+            if i % 10 == 0:
                 torch.cuda.empty_cache()
             
         bulk_jobs[job_id]["status"] = "completed"

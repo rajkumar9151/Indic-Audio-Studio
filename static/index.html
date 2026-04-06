@@ -243,12 +243,16 @@
                 </div>
                 
                 <div id="bulk-progress-container" style="display: none; margin-top: 30px; background: rgba(0,0,0,0.05); padding: 20px; border-radius: 16px;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
                         <span id="bulk-progress-text" style="font-weight: 600; color: var(--primary);">Processing: 0%</span>
-                        <span id="bulk-progress-count" style="font-size: 0.8rem; color: #64748b;">0 / 0 paras</span>
+                        <span id="bulk-time-estimated" style="font-size: 0.8rem; font-weight: 600; color: #f59e0b;">Calculating time...</span>
                     </div>
-                    <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; overflow: hidden;">
-                        <div id="bulk-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: 0.3s;"></div>
+                    <div style="width: 100%; height: 10px; background: rgba(0,0,0,0.1); border-radius: 5px; overflow: hidden; margin-bottom: 8px;">
+                        <div id="bulk-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: 0.5s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span id="bulk-progress-count" style="font-size: 0.75rem; color: #64748b;">0 / 0 paragraphs</span>
+                        <span style="font-size: 0.75rem; color: #10b981; font-weight: bold;" id="bulk-speed-text">Initializing GPU...</span>
                     </div>
                 </div>
 
@@ -306,6 +310,18 @@
                     </select>
                 </div>
 
+                <!-- NEW: Expert Prompt Mode -->
+                <div style="margin-top: 25px; border-top: 1px solid rgba(0,0,0,0.1); padding-top: 15px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <label style="margin: 0;">Advanced Prompt Mode</label>
+                        <input type="checkbox" id="expert-mode-toggle" onchange="toggleExpertMode(this.checked)">
+                    </div>
+                    <div id="expert-prompt-container" style="display: none;">
+                        <textarea id="manual-prompt" style="height: 100px; font-size: 0.8rem; background: rgba(61, 90, 254, 0.05); border: 1px dashed var(--primary);" 
+                            placeholder="Manually edit the AI's persona here..."></textarea>
+                    </div>
+                </div>
+
                 <hr style="opacity: 0.1">
                 <p style="font-size: 0.75rem; color: #64748b; font-style: italic;">
                     <b>Pro Tip:</b> Use "..." or "[pause]" for natural breathing in Tamil scripts.
@@ -328,6 +344,24 @@
             document.body.classList.toggle('dark-mode');
         }
 
+        function toggleExpertMode(isChecked) {
+            document.getElementById('expert-prompt-container').style.display = isChecked ? 'block' : 'none';
+            if (isChecked) {
+                document.getElementById('manual-prompt').value = buildPrompt();
+            }
+        }
+
+        function buildPrompt() {
+            const voice = document.getElementById('voice-preset').value;
+            const mood = document.getElementById('emotion').value;
+            const speed = document.getElementById('speed').value;
+            const clarity = document.getElementById('clarity').value;
+            
+            // Smarter Merge: Ensures 'Female' mood doesn't accidentally say 'Male voice' elsewhere
+            let finalPrompt = `${voice} voice, ${mood}, ${speed}, ${clarity}, speaking in Tamil.`;
+            return finalPrompt;
+        }
+
         async function updateHealth() {
             try {
                 const response = await fetch('/system-health');
@@ -338,9 +372,15 @@
 
                 if (data.cuda_available) {
                     dot.style.background = "#10b981";
-                    text.innerText = `GPU Active (L4/T4) - ${data.memory_allocated} Free`;
+                    text.innerText = `GPU Active (${data.memory_free} Free / ${data.memory_total})`;
                     badge.style.background = "#dcfce7";
                     badge.style.color = "#166534";
+                    
+                    // Warning if memory is low (likely ghost processes)
+                    const freeGB = parseFloat(data.memory_free);
+                    if (freeGB < 5) {
+                        text.innerText = `⚠️ Low Memory (${data.memory_free} Free) - Reset Advised`;
+                    }
                 } else {
                     dot.style.background = "#ef4444";
                     text.innerText = "System on CPU (Slow Mode)";
@@ -405,10 +445,24 @@
                     const percent = Math.round((statusData.progress / statusData.total) * 100);
                     document.getElementById('bulk-progress-bar').style.width = percent + "%";
                     document.getElementById('bulk-progress-text').innerText = `Processing: ${percent}%`;
-                    document.getElementById('bulk-progress-count').innerText = `${statusData.progress} / ${statusData.total} paras`;
+                    document.getElementById('bulk-progress-count').innerText = `${statusData.progress} / ${statusData.total} paragraphs`;
                     
+                    // Time Estimation Logic
+                    if (statusData.avg_chunk_time > 0 && statusData.status === 'processing') {
+                        const remainingChunks = statusData.total - statusData.progress;
+                        const remainingSeconds = remainingChunks * statusData.avg_chunk_time;
+                        const remainingMins = Math.ceil(remainingSeconds / 60);
+                        
+                        document.getElementById('bulk-time-estimated').innerText = `⏳ Estimated: ${remainingMins} min left`;
+                        document.getElementById('bulk-speed-text').innerText = `Speed: ${statusData.avg_chunk_time.toFixed(1)}s / para`;
+                    }
+
                     if (statusData.status === 'completed') {
                         clearInterval(interval);
+                        document.getElementById('bulk-progress-bar').style.width = "100%";
+                        document.getElementById('bulk-progress-text').innerText = `Finished!`;
+                        document.getElementById('bulk-time-estimated').innerText = `✓ Complete`;
+                        document.getElementById('bulk-speed-text').innerText = `Task Finished`;
                         document.getElementById('bulk-result').style.display = "block";
                     }
                 }
@@ -419,13 +473,8 @@
             const text = document.getElementById('tts-text').value;
             if (!text) return alert("Please enter some text!");
 
-            const voice = document.getElementById('voice-preset').value;
-            const speed = document.getElementById('speed').value;
-            const clarity = document.getElementById('clarity').value;
-            const emotion = document.getElementById('emotion').value;
-
-            // Combine all AI instructions into one professional prompt
-            const description = `${voice} voice, ${emotion}, ${speed}, ${clarity}, speaking in Tamil.`;
+            const isExpert = document.getElementById('expert-mode-toggle').checked;
+            const description = isExpert ? document.getElementById('manual-prompt').value : buildPrompt();
             
             const status = document.getElementById('status');
             const playerCard = document.getElementById('player-card');
