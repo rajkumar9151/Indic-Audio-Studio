@@ -79,7 +79,7 @@ async def generate_full_audio(request: TTSRequest):
         
         with torch.inference_mode():
             prompt_input_ids = tokenizer(request.text, return_tensors="pt").input_ids.to(device)
-            generation = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.8)
+            generation = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.6)
             
         audio_data = generation.cpu().numpy().astype("float32").squeeze()
         
@@ -112,7 +112,7 @@ async def stream_audio(request: TTSRequest):
         
         with torch.inference_mode():
             prompt_input_ids = tokenizer(request.text, return_tensors="pt").input_ids.to(device)
-            gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.8)
+            gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.6)
             
         audio_data = gen.cpu().numpy().astype("float32").squeeze()
         
@@ -175,7 +175,7 @@ async def bulk_generate(request: BulkRequest):
                         continue
                         
                     prompt_input_ids = tokenizer(sentence, return_tensors="pt").input_ids.to(device)
-                    gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.8)
+                    gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.6)
                     
                     audio_data = gen.cpu().numpy().astype("float32").squeeze()
                     # Hardware Silence fix for dots
@@ -204,12 +204,16 @@ async def bulk_generate(request: BulkRequest):
         # NITRO MERGE: Stitch all segments into one final file
         if bulk_jobs[job_id]["files"]:
             combined = AudioSegment.empty()
-            # Sort files to ensure correct order
             sorted_files = sorted(bulk_jobs[job_id]["files"])
             for f_url in sorted_files:
-                # Convert URL back to path
                 f_path = os.path.join(OUTPUT_DIR, f_url.replace("/outputs/", ""))
-                combined += AudioSegment.from_wav(f_path)
+                seg = AudioSegment.from_wav(f_path)
+                
+                if len(combined) == 0:
+                    combined = seg
+                else:
+                    # 100ms crossfade to remove clicking and stuttering at the seams
+                    combined = combined.append(seg, crossfade=100)
             
             final_ext = "mp3" if request.format == "mp3" else "wav"
             final_name = f"final_audiobook_{job_id}.{final_ext}"
