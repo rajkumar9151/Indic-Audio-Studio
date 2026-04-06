@@ -186,7 +186,8 @@ async def bulk_generate(request: BulkRequest):
                         continue
                         
                     prompt_input_ids = tokenizer(sentence, return_tensors="pt").input_ids.to(device)
-                    gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.6)
+                    # Use Greedy Decoding (Matching Solo 4K quality) to prevent silence bugs
+                    gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids)
                     
                     audio_data = gen.cpu().numpy().astype("float32").squeeze()
                     # Hardware Silence fix for dots
@@ -215,16 +216,15 @@ async def bulk_generate(request: BulkRequest):
         # NITRO MERGE: Stitch all segments into one final file
         if bulk_jobs[job_id]["files"]:
             combined = AudioSegment.empty()
-            sorted_files = sorted(bulk_jobs[job_id]["files"])
-            for f_url in sorted_files:
-                f_path = os.path.join(OUTPUT_DIR, f_url.replace("/outputs/", ""))
-                seg = AudioSegment.from_wav(f_path)
+            # Absolute paths for local pydub safety
+            for f_url in sorted(bulk_jobs[job_id]["files"]):
+                f_relative = f_url.replace("/outputs/", "")
+                f_path = os.path.join(OUTPUT_DIR, f_relative)
                 
-                if len(combined) == 0:
-                    combined = seg
-                else:
-                    # 100ms crossfade to remove clicking and stuttering at the seams
-                    combined = combined.append(seg, crossfade=100)
+                if os.path.exists(f_path):
+                    seg = AudioSegment.from_wav(f_path)
+                    # Add segments with a tiny 50ms join for perfect flow
+                    combined = combined.append(seg, crossfade=50) if len(combined) > 0 else seg
             
             final_ext = "mp3" if request.format == "mp3" else "wav"
             final_name = f"final_audiobook_{job_id}.{final_ext}"
