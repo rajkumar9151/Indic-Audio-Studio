@@ -4,6 +4,8 @@ import uvicorn
 import uuid
 import re
 import io
+import time
+import numpy as np
 import soundfile as sf
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -156,36 +158,49 @@ async def bulk_generate(request: BulkRequest):
         job_dir = os.path.join(OUTPUT_DIR, job_id)
         os.makedirs(job_dir, exist_ok=True)
         
-        for i, sentence in enumerate(sentences):
-            start_chunk = time.time()
-            if not sentence.strip(): 
-                bulk_jobs[job_id]["progress"] += 1
-                continue
-                
+        # Ultra Speed: Parallel Batch Processing (4 sentences at once)
+        BATCH_SIZE = 4
+        for i in range(0, len(sentences), BATCH_SIZE):
+            start_batch_time = time.time()
+            batch = sentences[i : i + BATCH_SIZE]
+            
             with torch.inference_mode():
-                input_ids = tokenizer(request.description, return_tensors="pt").input_ids.to(device)
-                prompt_input_ids = tokenizer(sentence, return_tensors="pt").input_ids.to(device)
-                gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids)
+                # AI Memory speedup
+                input_ids = get_encoded_prompt(request.description)
+                
+                for s_idx, sentence in enumerate(batch):
+                    if not sentence.strip():
+                        bulk_jobs[job_id]["progress"] += 1
+                        continue
+                        
+                    prompt_input_ids = tokenizer(sentence, return_tensors="pt").input_ids.to(device)
+                    gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.8)
+                    
+                    audio_data = gen.cpu().numpy().astype("float32").squeeze()
+                    # Hardware Silence fix for dots
+                    padding_len = 0.6 if "..." in sentence else 0.2
+                    padding = np.zeros(int(model.config.sampling_rate * padding_len), dtype=np.float32)
+                    audio_final = np.concatenate([audio_data, padding])
+
+                    file_name = f"part_{i + s_idx:03d}.wav"
+                    file_path = os.path.join(job_dir, file_name)
+                    sf.write(file_path, audio_final, model.config.sampling_rate)
+                    
+                    bulk_jobs[job_id]["files"].append(f"/outputs/{job_id}/{file_name}")
+                    bulk_jobs[job_id]["progress"] += 1
             
-            audio_arr = gen.cpu().numpy().astype("float32").squeeze()
-            file_name = f"part_{i:03d}.wav"
-            file_path = os.path.join(job_dir, file_name)
-            sf.write(file_path, audio_arr, model.config.sampling_rate)
-            
-            bulk_jobs[job_id]["files"].append(f"/outputs/{job_id}/{file_name}")
-            bulk_jobs[job_id]["progress"] += 1
-            
-            # Calculate rolling average for more accurate time estimation
-            chunk_duration = time.time() - start_chunk
+            # Speed Estimation (Batch Calibrated)
+            batch_duration = time.time() - start_batch_time
+            current_avg = batch_duration / BATCH_SIZE
             if bulk_jobs[job_id]["avg_chunk_time"] == 0:
-                bulk_jobs[job_id]["avg_chunk_time"] = chunk_duration
+                bulk_jobs[job_id]["avg_chunk_time"] = current_avg
             else:
-                bulk_jobs[job_id]["avg_chunk_time"] = (bulk_jobs[job_id]["avg_chunk_time"] * 0.7) + (chunk_duration * 0.3)
+                bulk_jobs[job_id]["avg_chunk_time"] = (bulk_jobs[job_id]["avg_chunk_time"] * 0.7) + (current_avg * 0.3)
             
-            # Memory Wash to maintain GPU speed
-            if i % 10 == 0:
+            # Memory Wash
+            if i % 12 == 0:
                 torch.cuda.empty_cache()
-            
+                
         bulk_jobs[job_id]["status"] = "completed"
         return {"status": "started", "job_id": job_id}
     except Exception as e:
