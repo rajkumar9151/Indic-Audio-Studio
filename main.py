@@ -51,7 +51,10 @@ class BulkRequest(BaseModel):
 def split_text(text):
     # Pre-process text to replace '...' with a pause token for the model
     text = text.replace("...", " [pause] ")
-    return re.split(r'(?<=[.!?])\s+', text)
+    # Robust regex to split on . ! ? even without a following space. 
+    # Also filters out empty strings and trailing whitespace.
+    chunks = [s.strip() for s in re.split(r'(?<=[.!?])\s*', text) if s.strip()]
+    return chunks
 
 @app.post("/generate")
 async def generate_full_audio(request: TTSRequest):
