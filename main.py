@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
+import numpy as np
 from parler_tts import ParlerTTSForConditionalGeneration
 from transformers import AutoTokenizer
 
@@ -67,22 +68,17 @@ async def generate_full_audio(request: TTSRequest):
             if request.quality == "4k":
                 model.to(torch.float32)
             
-            generation = model.generate(
-                input_ids=input_ids, 
-                prompt_input_ids=prompt_input_ids,
-                do_sample=True,
-                temperature=0.8,  # Increased for less robotic voice
-                top_p=0.95
-            )
+            generation = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.8)
             
-            if request.quality == "4k":
-                model.to(torch.float16)
+        audio_data = generation.cpu().numpy().astype("float32").squeeze()
+        
+        # Add a tiny bit of padding at the end for natural flow
+        padding = np.zeros(int(model.config.sampling_rate * 0.5), dtype=np.float32)
+        audio_final = np.concatenate([audio_data, padding])
 
-        # FIX: Ensure we cast to float32 before saving to a WAV file
-        audio_arr = generation.cpu().numpy().astype("float32").squeeze()
         file_id = f"audio_{uuid.uuid4().hex[:8]}.wav"
         file_path = os.path.join(OUTPUT_DIR, file_id)
-        sf.write(file_path, audio_arr, model.config.sampling_rate)
+        sf.write(file_path, audio_final, model.config.sampling_rate)
         
         return {"url": f"/outputs/{file_id}", "status": "success"}
     except Exception as e:
@@ -98,8 +94,14 @@ async def stream_audio(request: TTSRequest):
             gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.8)
             
         audio_data = gen.cpu().numpy().astype("float32").squeeze()
+        
+        # If text contains '...', add extra silence manually
+        padding_len = 0.8 if "..." in request.text else 0.2
+        padding = np.zeros(int(model.config.sampling_rate * padding_len), dtype=np.float32)
+        audio_final = np.concatenate([audio_data, padding])
+
         buffer = io.BytesIO()
-        sf.write(buffer, audio_data, model.config.sampling_rate, format="WAV")
+        sf.write(buffer, audio_final, model.config.sampling_rate, format="WAV")
         buffer.seek(0)
         return StreamingResponse(buffer, media_type="audio/wav")
     except Exception as e:
