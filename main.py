@@ -55,14 +55,22 @@ class TTSRequest(BaseModel):
     text: str
     description: str
     quality: str = "turbo" 
-    format: str = "wav" # Default to WAV
+    format: str = "wav"
+    temperature: float = 0.6
+    top_p: float = 0.95
+    pad_normal: int = 50
+    pad_dot: int = 600
 
 class BulkRequest(BaseModel):
     text: str
     description: str
     job_id: str
     format: str = "wav"
-    quality: str = "turbo" # Added quality to bulk
+    quality: str = "turbo"
+    temperature: float = 0.6
+    top_p: float = 0.95
+    pad_normal: int = 50
+    pad_dot: int = 600
 
 def split_text(text):
     # Pre-process text to replace '...' with a pause token for the model
@@ -79,12 +87,18 @@ async def generate_full_audio(request: TTSRequest):
         
         with torch.inference_mode():
             prompt_input_ids = tokenizer(request.text, return_tensors="pt").input_ids.to(device)
-            generation = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.6)
+            generation = model.generate(
+                input_ids=input_ids, 
+                prompt_input_ids=prompt_input_ids, 
+                do_sample=True, 
+                temperature=request.temperature, 
+                top_p=request.top_p
+            )
             
         audio_data = generation.cpu().numpy().astype("float32").squeeze()
         
-        # Reduced padding (0.05s) to stop 'lingering'
-        padding_len = 0.5 if "..." in request.text else 0.05
+        # User-defined padding logic
+        padding_len = request.pad_dot / 1000.0 if "..." in request.text else request.pad_normal / 1000.0
         padding = np.zeros(int(model.config.sampling_rate * padding_len), dtype=np.float32)
         audio_final = np.concatenate([audio_data, padding])
 
@@ -112,12 +126,12 @@ async def stream_audio(request: TTSRequest):
         
         with torch.inference_mode():
             prompt_input_ids = tokenizer(request.text, return_tensors="pt").input_ids.to(device)
-            gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=0.6)
+            generation = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids, do_sample=True, temperature=request.temperature, top_p=request.top_p)
             
-        audio_data = gen.cpu().numpy().astype("float32").squeeze()
+        audio_data = generation.cpu().numpy().astype("float32").squeeze()
         
-        # Tight flow for streaming (0.05s)
-        padding_len = 0.5 if "..." in request.text else 0.05
+        # User-defined padding logic
+        padding_len = request.pad_dot / 1000.0 if "..." in request.text else request.pad_normal / 1000.0
         padding = np.zeros(int(model.config.sampling_rate * padding_len), dtype=np.float32)
         audio_final = np.concatenate([audio_data, padding])
 
@@ -179,11 +193,18 @@ async def bulk_generate(request: BulkRequest):
                         
                     prompt_input_ids = tokenizer(sentence, return_tensors="pt").input_ids.to(device)
                     # Use Greedy Decoding (Matching Solo 4K quality) to prevent silence bugs
-                    gen = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids)
+                    # Dynamic Pro Controls
+                    gen = model.generate(
+                        input_ids=input_ids, 
+                        prompt_input_ids=prompt_input_ids,
+                        do_sample=True,
+                        temperature=request.temperature,
+                        top_p=request.top_p
+                    )
                     
                     audio_data = gen.cpu().numpy().astype("float32").squeeze()
-                    # Hardware Silence fix for dots
-                    padding_len = 0.6 if "..." in sentence else 0.2
+                    # User-defined padding
+                    padding_len = request.pad_dot / 1000.0 if "..." in sentence else request.pad_normal / 1000.0
                     padding = np.zeros(int(model.config.sampling_rate * padding_len), dtype=np.float32)
                     audio_final = np.concatenate([audio_data, padding])
 

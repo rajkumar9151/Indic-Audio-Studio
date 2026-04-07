@@ -284,11 +284,35 @@
                 </div>
 
                 <div class="setting-group">
-                    <label>Audio Format</label>
+                    <label>Performance Profile</label>
                     <select id="audio-format">
-                        <option value="wav">WAV (Lossless / High Quality)</option>
-                        <option value="mp3">MP3 (Compressed / Small Size)</option>
+                        <option value="wav">WAV (Uncompressed / Pro)</option>
+                        <option value="mp3">MP3 (Web-Optimized)</option>
                     </select>
+                </div>
+
+                <div class="advanced-section" style="margin-top: 20px; padding: 15px; background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;">
+                    <div class="section-title" style="font-weight: 700; color: #1e293b; margin-bottom: 15px; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em;">🎛️ Generation Controls</div>
+                    
+                    <div class="setting-group">
+                        <label>Temperature (<span id="label-temp">0.6</span>)</label>
+                        <input type="range" id="param-temp" min="0.1" max="1.5" step="0.1" value="0.6" oninput="document.getElementById('label-temp').innerText = this.value">
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label>Top-P (<span id="label-top-p">0.95</span>)</label>
+                        <input type="range" id="param-top-p" min="0.1" max="1.0" step="0.05" value="0.95" oninput="document.getElementById('label-top-p').innerText = this.value">
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Sentence Pauser (ms)</label>
+                        <input type="number" id="param-pad-normal" value="50" style="width: 100%; padding: 8px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Dot (...) Pauser (ms)</label>
+                        <input type="number" id="param-pad-dot" value="600" style="width: 100%; padding: 8px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                    </div>
                 </div>
 
                 <div class="setting-group">
@@ -451,11 +475,26 @@
             document.getElementById('bulk-result').style.display = "none";
 
             const format = document.getElementById('audio-format').value;
+            const quality = selectedQuality;
+            const temperature = parseFloat(document.getElementById('param-temp').value);
+            const top_p = parseFloat(document.getElementById('param-top-p').value);
+            const pad_normal = parseInt(document.getElementById('param-pad-normal').value);
+            const pad_dot = parseInt(document.getElementById('param-pad-dot').value);
 
             const response = await fetch('/bulk-generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: currentBulkText, description, job_id: jobId, format: format })
+                body: JSON.stringify({ 
+                    text: currentBulkText, 
+                    description, 
+                    job_id: jobId, 
+                    format, 
+                    quality,
+                    temperature,
+                    top_p,
+                    pad_normal,
+                    pad_dot
+                })
             });
 
             // Poll for status
@@ -526,31 +565,66 @@
             }, 150);
 
             try {
-                const endpoint = mode === 'stream' ? '/stream' : '/generate';
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        text, 
-                        description, 
-                        quality: selectedQuality,
-                        format: document.getElementById('audio-format').value
-                    })
-                });
-                
-                clearInterval(iv);
-                soloProgressBar.style.width = "100%";
-                soloProgressPercent.innerText = "100%";
+                // Read Advanced Params
+                const format = document.getElementById('audio-format').value;
+                const temp = parseFloat(document.getElementById('param-temp').value);
+                const top_p = parseFloat(document.getElementById('param-top-p').value);
+                const pad_n = parseInt(document.getElementById('param-pad-normal').value);
+                const pad_d = parseInt(document.getElementById('param-pad-dot').value);
 
                 if (mode === 'stream') {
-                    const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    audioPlayer.src = url;
-                    audioPlayer.play();
-                    playerCard.style.display = "block";
+                    const sentences = text.replace(/\.\.\./g, ' [pause] ').split(/[.!?]\s*/).filter(s => s.trim());
+                    let audioQueue = [], isPlaying = false, processedCount = 0;
+                    async function playNext() {
+                        if (audioQueue.length > 0 && !isPlaying) {
+                            isPlaying = true;
+                            audioPlayer.src = audioQueue.shift();
+                            audioPlayer.onended = () => { isPlaying = false; playNext(); };
+                            audioPlayer.play();
+                            playerCard.style.display = "block";
+                        }
+                    }
+                    const BATCH_SIZE = 4;
+                    for (let i = 0; i < sentences.length; i += BATCH_SIZE) {
+                        const batch = sentences.slice(i, i + BATCH_SIZE);
+                        const results = await Promise.all(batch.map(async (s) => {
+                            const r = await fetch('/stream', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ 
+                                    text: s, description, quality: selectedQuality, format,
+                                    temperature: temp, top_p: top_p, pad_normal: pad_n, pad_dot: pad_d 
+                                })
+                            });
+                            return await r.blob();
+                        }));
+                        for (const b of results) {
+                            audioQueue.push(URL.createObjectURL(b));
+                            processedCount++;
+                            const p = Math.round((processedCount / sentences.length) * 100);
+                            soloProgressBar.style.width = p + "%";
+                            soloProgressPercent.innerText = p + "%";
+                            playNext();
+                        }
+                    }
                     status.innerText = "⚡ Streaming Complete";
+                    clearInterval(iv);
+                    soloProgressBar.style.width = "100%";
+                    soloProgressPercent.innerText = "100%";
                 } else {
+                    const response = await fetch('/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            text, description, quality: selectedQuality, format,
+                            temperature: temp, top_p: top_p, pad_normal: pad_n, pad_dot: pad_d 
+                        })
+                    });
                     const data = await response.json();
+                    clearInterval(iv);
+                    soloProgressBar.style.width = "100%";
+                    soloProgressPercent.innerText = "100%";
+                    
                     if (data.status === 'success') {
                         audioPlayer.src = data.url;
                         downloadBtn.href = data.url;
